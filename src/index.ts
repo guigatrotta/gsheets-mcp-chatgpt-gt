@@ -52,8 +52,9 @@ async function signRS256(privateKeyPem: string, data: string) {
   return base64UrlEncode(signature);
 }
 
-async function getServiceAccountAccessToken(saJson: string) {
-  const sa = JSON.parse(saJson) as ServiceAccount;
+async function getServiceAccountAccessToken(saJson: string | ServiceAccount) {
+  const sa =
+    typeof saJson === "string" ? (JSON.parse(saJson) as ServiceAccount) : saJson;
 
   if (!sa.client_email || !sa.private_key) {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON inválido");
