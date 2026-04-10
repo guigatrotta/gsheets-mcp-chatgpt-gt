@@ -5,7 +5,7 @@ import { z } from "zod";
 type Env = {
   MCP_OBJECT: DurableObjectNamespace;
   GOOGLE_API_KEY?: string;
-  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string | ServiceAccount;
 };
 
 type ServiceAccount = {
@@ -52,7 +52,10 @@ async function signRS256(privateKeyPem: string, data: string) {
   return base64UrlEncode(signature);
 }
 
-async function getServiceAccountAccessToken(saJson: string | ServiceAccount) {
+async function getServiceAccountAccessToken(
+  saJson: string | ServiceAccount,
+  scope = "https://www.googleapis.com/auth/spreadsheets"
+) {
   const sa =
     typeof saJson === "string" ? (JSON.parse(saJson) as ServiceAccount) : saJson;
 
@@ -69,7 +72,7 @@ async function getServiceAccountAccessToken(saJson: string | ServiceAccount) {
 
   const claimSet = {
     iss: sa.client_email,
-    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+    scope,
     aud: sa.token_uri || "https://oauth2.googleapis.com/token",
     exp: now + 3600,
     iat: now,
@@ -106,23 +109,24 @@ async function getServiceAccountAccessToken(saJson: string | ServiceAccount) {
 }
 
 async function fetchSheetWithServiceAccount(
-  saJson: string,
+  saJson: string | ServiceAccount,
   spreadsheetId: string,
   range: string
 ) {
-  const accessToken = await getServiceAccountAccessToken(saJson);
+  const accessToken = await getServiceAccountAccessToken(
+    saJson,
+    "https://www.googleapis.com/auth/spreadsheets.readonly"
+  );
 
   const url =
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
     `/values/${encodeURIComponent(range)}`;
 
-  const res = await fetch(url, {
+  return fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
-
-  return res;
 }
 
 async function fetchSheetWithApiKey(
@@ -134,14 +138,42 @@ async function fetchSheetWithApiKey(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
     `/values/${encodeURIComponent(range)}?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url);
-  return res;
+  return fetch(url);
+}
+
+async function updateCellWithServiceAccount(
+  saJson: string | ServiceAccount,
+  spreadsheetId: string,
+  range: string,
+  value: string
+) {
+  const accessToken = await getServiceAccountAccessToken(
+    saJson,
+    "https://www.googleapis.com/auth/spreadsheets"
+  );
+
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
+    `/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+
+  return fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      range,
+      majorDimension: "ROWS",
+      values: [[value]],
+    }),
+  });
 }
 
 export class MyMCP extends McpAgent<Env> {
   server = new McpServer({
-    name: "Google Sheets Reader",
-    version: "1.1.0",
+    name: "Google Sheets Reader Writer",
+    version: "1.2.0",
   });
 
   async init() {
@@ -156,7 +188,7 @@ export class MyMCP extends McpAgent<Env> {
 
         let res: Response | null = null;
         let modeUsed = "";
-        let errors: string[] = [];
+        const errors: string[] = [];
 
         if (this.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
           try {
@@ -204,8 +236,7 @@ export class MyMCP extends McpAgent<Env> {
               {
                 type: "text",
                 text:
-                  "Falha ao ler a planilha.\n\n" +
-                  "Tentativas:\n" +
+                  "Falha ao ler a planilha.\n\nTentativas:\n" +
                   errors.map((e) => `- ${e}`).join("\n"),
               },
             ],
@@ -236,6 +267,82 @@ export class MyMCP extends McpAgent<Env> {
             },
           ],
         };
+      }
+    );
+
+    this.server.tool(
+      "update_cell",
+      {
+        spreadsheetId: z.string().describe("ID da planilha Google Sheets"),
+        range: z.string().describe("Uma célula em formato A1, ex: polls!A1"),
+        value: z.string().describe("Novo valor para a célula"),
+      },
+      async ({ spreadsheetId, range, value }) => {
+        if (!this.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Erro: GOOGLE_SERVICE_ACCOUNT_JSON não configurado. Escrita exige service account.",
+              },
+            ],
+          };
+        }
+
+        try {
+          const res = await updateCellWithServiceAccount(
+            this.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+            spreadsheetId,
+            range.trim(),
+            value
+          );
+
+          if (!res.ok) {
+            const text = await res.text();
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Erro ao atualizar célula: ${res.status} ${text}`,
+                },
+              ],
+            };
+          }
+
+          const data = await res.json();
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    auth_mode: "service_account",
+                    updatedRange: data.updatedRange || range,
+                    updatedRows: data.updatedRows,
+                    updatedColumns: data.updatedColumns,
+                    updatedCells: data.updatedCells,
+                    value,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (err) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Erro ao atualizar célula: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              },
+            ],
+          };
+        }
       }
     );
   }
