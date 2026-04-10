@@ -12,8 +12,9 @@
 		"type-check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"agents": "^0.9.0",
-		"zod": "^4.3.6"
+		"agents": "latest",
+    	"@modelcontextprotocol/sdk": "latest",
+    	"zod": "latest"
 	},
 	"devDependencies": {
 		"oxfmt": "^0.43.0",
