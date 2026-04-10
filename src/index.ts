@@ -1,67 +1,79 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-// Define our MCP agent with tools
-export class MyMCP extends McpAgent {
-	server = new McpServer({
-		name: "Authless Calculator",
-		version: "1.0.0",
-	});
+type Env = {
+  MCP_OBJECT: DurableObjectNamespace;
+};
 
-	async init() {
-		// Simple addition tool
-		this.server.tool("add", { a: z.number(), b: z.number() }, async ({ a, b }) => ({
-			content: [{ type: "text", text: String(a + b) }],
-		}));
+class MyMCP extends McpAgent<Env> {
+  server = new McpServer({
+    name: "Google Sheets Reader",
+    version: "1.0.0",
+  });
 
-		// Calculator tool with multiple operations
-		this.server.tool(
-			"calculate",
-			{
-				operation: z.enum(["add", "subtract", "multiply", "divide"]),
-				a: z.number(),
-				b: z.number(),
-			},
-			async ({ operation, a, b }) => {
-				let result: number;
-				switch (operation) {
-					case "add":
-						result = a + b;
-						break;
-					case "subtract":
-						result = a - b;
-						break;
-					case "multiply":
-						result = a * b;
-						break;
-					case "divide":
-						if (b === 0)
-							return {
-								content: [
-									{
-										type: "text",
-										text: "Error: Cannot divide by zero",
-									},
-								],
-							};
-						result = a / b;
-						break;
-				}
-				return { content: [{ type: "text", text: String(result) }] };
-			},
-		);
-	}
+  async init() {
+    this.server.tool(
+      "read_public_sheet",
+      {
+        spreadsheetId: z.string(),
+        range: z.string().optional(),
+      },
+      async ({ spreadsheetId, range }) => {
+        const targetRange = range?.trim() || "A:Z";
+        const url =
+          `https://sheets.googleapis.com/v4/spreadsheets/` +
+          `${encodeURIComponent(spreadsheetId)}/values/` +
+          `${encodeURIComponent(targetRange)}?key=${this.env.GOOGLE_API_KEY}`;
+
+        const res = await fetch(url);
+
+        if (!res.ok) {
+          const text = await res.text();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Erro ao ler planilha: ${res.status} ${text}`,
+              },
+            ],
+          };
+        }
+
+        const data = await res.json<any>();
+        const values = Array.isArray(data.values) ? data.values : [];
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  range: data.range,
+                  rows: values.length,
+                  values,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    );
+  }
 }
 
+export { MyMCP };
+
 export default {
-	fetch(request: Request, env: Env, ctx: ExecutionContext) {
-		const url = new URL(request.url);
+  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const url = new URL(request.url);
 
-		if (url.pathname === "/mcp") {
-			return MyMCP.serve("/mcp").fetch(request, env, ctx);
-		}
+    if (url.pathname === "/mcp") {
+      return MyMCP.serve("/mcp").fetch(request, env, ctx);
+    }
 
-		return new Response("Not found", { status: 404 });
-	},
+    return new Response("Not found", { status: 404 });
+  },
 };
