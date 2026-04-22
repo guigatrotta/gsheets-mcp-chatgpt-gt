@@ -18,6 +18,21 @@ npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/rem
 
 To add your own [tools](https://developers.cloudflare.com/agents/model-context-protocol/tools/) to the MCP server, define each tool inside the `init()` method of `src/index.ts` using `this.server.tool(...)`.
 
+## Google Sheets: secrets no Cloudflare Worker
+
+Este projeto lê planilhas com **API key** e/ou **service account**; **escrever** (`update_cell`) usa **somente** service account.
+
+| Nome do secret / variável | Uso |
+|---------------------------|-----|
+| `GOOGLE_API_KEY` | Opcional: leitura pública (`read_sheet`) com chave de API. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | **Obrigatório para escrita:** JSON completo da conta de serviço Google (projeto GCP → IAM → service account → chaves JSON). |
+
+**No dashboard Cloudflare:** Workers & Pages → seu worker → **Settings** → **Variables and Secrets** → **Add** → **Secret** → nome **`GOOGLE_SERVICE_ACCOUNT_JSON`** → colar o JSON (idealmente minificado em uma linha).
+
+**CLI:** `npx wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON` (o comando pede o valor de forma segura).
+
+No Google Sheets, compartilhe a planilha com o endereço **`client_email`** do JSON (permissão de editor) para a service account conseguir gravar.
+
 ## Connect to Cloudflare AI Playground
 
 You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:

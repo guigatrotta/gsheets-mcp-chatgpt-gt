@@ -299,7 +299,13 @@ export class MyMCP extends McpAgent<Env> {
             content: [
               {
                 type: "text",
-                text: "Erro: GOOGLE_SERVICE_ACCOUNT_JSON não configurado. Escrita exige service account.",
+                text:
+                  "Erro: GOOGLE_SERVICE_ACCOUNT_JSON não está definido no Worker.\n\n" +
+                  "A API do Google Sheets só permite escrita com OAuth de service account (não com API key).\n\n" +
+                  "No Cloudflare: Workers & Pages > seu worker > Settings > Variables and Secrets > " +
+                  "Add > Secret > nome exato: GOOGLE_SERVICE_ACCOUNT_JSON > valor: JSON inteiro da conta de serviço (uma linha).\n\n" +
+                  "Ou no terminal: wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON\n\n" +
+                  "Compartilhe a planilha com o e-mail client_email do JSON (Editor).",
               },
             ],
           };
