@@ -1,9 +1,23 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-type Env = {
-  MCP_OBJECT: DurableObjectNamespace;
+const readSheetAnnotations: ToolAnnotations = {
+  title: "Ler planilha",
+  readOnlyHint: true,
+  openWorldHint: true,
+};
+
+const updateCellAnnotations: ToolAnnotations = {
+  title: "Atualizar célula",
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+
+type Env = Cloudflare.Env & {
   GOOGLE_API_KEY?: string;
   GOOGLE_SERVICE_ACCOUNT_JSON?: string | ServiceAccount;
 };
@@ -183,6 +197,7 @@ export class MyMCP extends McpAgent<Env> {
         spreadsheetId: z.string().describe("ID da planilha Google Sheets"),
         range: z.string().optional().describe("Intervalo A1, ex: polls!A1:Z20"),
       },
+      readSheetAnnotations,
       async ({ spreadsheetId, range }) => {
         const targetRange = range?.trim() || "A:Z";
 
@@ -277,6 +292,7 @@ export class MyMCP extends McpAgent<Env> {
         range: z.string().describe("Uma célula em formato A1, ex: polls!A1"),
         value: z.string().describe("Novo valor para a célula"),
       },
+      updateCellAnnotations,
       async ({ spreadsheetId, range, value }) => {
         if (!this.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
           return {
@@ -309,7 +325,12 @@ export class MyMCP extends McpAgent<Env> {
             };
           }
 
-          const data = await res.json();
+          const data = (await res.json()) as {
+            updatedRange?: string;
+            updatedRows?: number;
+            updatedColumns?: number;
+            updatedCells?: number;
+          };
 
           return {
             content: [
